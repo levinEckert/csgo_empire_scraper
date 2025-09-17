@@ -224,23 +224,35 @@ class CSGOEmpireScraper:
                         if prev is not None and len(curr) == len(prev):
                             n = len(curr)
                             logged = False
-                            # Find m in 1..n such that prev[m:] == curr[:-m]
-                            for m in range(1, n + 1):
+                            # Find the largest overlap m in 1..n-1 such that prev[m:] == curr[:-m]
+                            m_found = 0
+                            for m in range(1, n):  # IMPORTANT: stop at n-1 to avoid empty-slice always-true case
                                 if prev[m:] == curr[:-m]:
-                                    new_items = curr[-m:]
-                                    for item in new_items:
-                                        if item in {"CT", "T", "BONUS"}:  # ignore UNKNOWN noise
-                                            ts = datetime.utcnow().isoformat()
-                                            with open(csv_path, "a", newline="") as f:
-                                                writer = csv.writer(f)
-                                                writer.writerow([ts, item])
-                                            print(f"[NEW ROLL] {item} @ {ts}")
-                                            last_activity = time.time()
-                                    logged = True
-                                    break
-                            if not logged:
-                                # No clean alignment found; reset baseline to current without logging
-                                print("[DEBUG] No alignment with previous window; resetting baseline.")
+                                    m_found = m  # keep searching for the largest m
+                            if m_found > 0:
+                                new_items = curr[-m_found:]
+                                for item in new_items:
+                                    if item in {"CT", "T", "BONUS"}:  # ignore UNKNOWN noise
+                                        ts = datetime.utcnow().isoformat()
+                                        with open(csv_path, "a", newline="") as f:
+                                            writer = csv.writer(f)
+                                            writer.writerow([ts, item])
+                                        print(f"[NEW ROLL] {item} @ {ts}")
+                                        last_activity = time.time()
+                                logged = True
+                            else:
+                                # No clean alignment found. To avoid missing bursts, record only the latest item once
+                                # when the window changed substantially, and then reset the baseline.
+                                if curr != prev and curr[-1] in {"CT", "T", "BONUS"}:
+                                    ts = datetime.utcnow().isoformat()
+                                    with open(csv_path, "a", newline="") as f:
+                                        writer = csv.writer(f)
+                                        writer.writerow([ts, curr[-1]])
+                                    print(f"[NEW ROLL] {curr[-1]} @ {ts} (no-overlap fallback)")
+                                    last_activity = time.time()
+                                else:
+                                    print("[DEBUG] No alignment with previous window; resetting baseline.")
+
                         prev = curr
 
                         if max_minutes is not None:
