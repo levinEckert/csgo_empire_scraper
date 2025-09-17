@@ -181,7 +181,7 @@ class CSGOEmpireScraper:
     def track_polling_csv(self, csv_path="rolls.csv", interval_sec=5, max_minutes=None):
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=False)
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
                 page = browser.new_page()
                 page.goto(self.url)
                 print(f"[INFO] Started polling-based tracking. Writing to {csv_path}")
