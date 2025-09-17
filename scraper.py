@@ -217,6 +217,7 @@ class CSGOEmpireScraper:
                 start_time = time.time()
                 last_activity = time.time()
                 reload_interval = 300  # seconds (5 minutes)
+                last_logged = None  # remember the last item we persisted to CSV to avoid duplicates
 
                 while True:
                     try:
@@ -224,32 +225,36 @@ class CSGOEmpireScraper:
                         if prev is not None and len(curr) == len(prev):
                             n = len(curr)
                             logged = False
-                            # Find the largest overlap m in 1..n-1 such that prev[m:] == curr[:-m]
+                            # Find the **smallest** shift m in 1..n-1 such that the window moved left by m
+                            # i.e., prev[m:] == curr[:-m]. Using the smallest m avoids duplicate logs when
+                            # repeated patterns create multiple valid overlaps.
                             m_found = 0
-                            for m in range(1, n):  # IMPORTANT: stop at n-1 to avoid empty-slice always-true case
+                            for m in range(1, n):  # stop at n-1
                                 if prev[m:] == curr[:-m]:
-                                    m_found = m  # keep searching for the largest m
+                                    m_found = m
+                                    break  # choose the minimal shift only
+
                             if m_found > 0:
-                                new_items = curr[-m_found:]
-                                for item in new_items:
-                                    if item in {"CT", "T", "BONUS"}:  # ignore UNKNOWN noise
-                                        ts = datetime.utcnow().isoformat()
-                                        with open(csv_path, "a", newline="") as f:
-                                            writer = csv.writer(f)
-                                            writer.writerow([ts, item])
-                                        print(f"[NEW ROLL] {item} @ {ts}")
-                                        last_activity = time.time()
-                                logged = True
-                            else:
-                                # No clean alignment found. To avoid missing bursts, record only the latest item once
-                                # when the window changed substantially, and then reset the baseline.
-                                if curr != prev and curr[-1] in {"CT", "T", "BONUS"}:
+                                candidate = curr[-1]  # only the newest (rightmost) item
+                                if candidate in {"CT", "T", "BONUS"} and candidate != last_logged:
                                     ts = datetime.utcnow().isoformat()
                                     with open(csv_path, "a", newline="") as f:
                                         writer = csv.writer(f)
-                                        writer.writerow([ts, curr[-1]])
-                                    print(f"[NEW ROLL] {curr[-1]} @ {ts} (no-overlap fallback)")
+                                        writer.writerow([ts, candidate])
+                                    print(f"[NEW ROLL] {candidate} @ {ts}")
                                     last_activity = time.time()
+                                    last_logged = candidate
+                                logged = True
+                            else:
+                                candidate = curr[-1]
+                                if curr != prev and candidate in {"CT", "T", "BONUS"} and candidate != last_logged:
+                                    ts = datetime.utcnow().isoformat()
+                                    with open(csv_path, "a", newline="") as f:
+                                        writer = csv.writer(f)
+                                        writer.writerow([ts, candidate])
+                                    print(f"[NEW ROLL] {candidate} @ {ts} (no-overlap fallback)")
+                                    last_activity = time.time()
+                                    last_logged = candidate
                                 else:
                                     print("[DEBUG] No alignment with previous window; resetting baseline.")
 
@@ -269,6 +274,7 @@ class CSGOEmpireScraper:
                                 page.wait_for_selector("div.previous-rolls-item > div", timeout=30000)
                                 last_activity = time.time()
                                 prev = None  # reset baseline after reload
+                                last_logged = None
                             except Exception as reload_e:
                                 print(f"[WARNING] Reload failed: {reload_e}")
 
