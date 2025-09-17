@@ -183,7 +183,11 @@ class CSGOEmpireScraper:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
                 page = browser.new_page()
-                page.goto(self.url)
+                page.goto(self.url, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_selector("div.previous-rolls-item > div", timeout=30000)
+                except Exception:
+                    print("[WARNING] Rolls container not found within 30s; continuing anyway.")
                 print(f"[INFO] Started polling-based tracking. Writing to {csv_path}")
 
                 # Ensure CSV has a header if the file is empty/non-existent
@@ -211,17 +215,32 @@ class CSGOEmpireScraper:
 
                 prev = None
                 start_time = time.time()
+                last_activity = time.time()
+                reload_interval = 300  # seconds (5 minutes)
 
                 while True:
                     try:
                         curr = _read_rolls()
-                        if prev is not None:
-                            if len(curr) == len(prev) and curr[:-1] == prev[1:] and curr[-1] in {"CT", "T", "BONUS"}:
-                                ts = datetime.utcnow().isoformat()
-                                with open(csv_path, "a", newline="") as f:
-                                    writer = csv.writer(f)
-                                    writer.writerow([ts, curr[-1]])
-                                print(f"[NEW ROLL] {curr[-1]} @ {ts}")
+                        if prev is not None and len(curr) == len(prev):
+                            n = len(curr)
+                            logged = False
+                            # Find m in 1..n such that prev[m:] == curr[:-m]
+                            for m in range(1, n + 1):
+                                if prev[m:] == curr[:-m]:
+                                    new_items = curr[-m:]
+                                    for item in new_items:
+                                        if item in {"CT", "T", "BONUS"}:  # ignore UNKNOWN noise
+                                            ts = datetime.utcnow().isoformat()
+                                            with open(csv_path, "a", newline="") as f:
+                                                writer = csv.writer(f)
+                                                writer.writerow([ts, item])
+                                            print(f"[NEW ROLL] {item} @ {ts}")
+                                            last_activity = time.time()
+                                    logged = True
+                                    break
+                            if not logged:
+                                # No clean alignment found; reset baseline to current without logging
+                                print("[DEBUG] No alignment with previous window; resetting baseline.")
                         prev = curr
 
                         if max_minutes is not None:
@@ -229,6 +248,17 @@ class CSGOEmpireScraper:
                             if elapsed_minutes >= max_minutes:
                                 print("[INFO] Maximum runtime reached, stopping polling.")
                                 break
+
+                        # Reload page if no new activity for too long
+                        if (time.time() - last_activity) > reload_interval:
+                            print("[INFO] No new rolls detected for a while; reloading page...")
+                            try:
+                                page.reload(wait_until="domcontentloaded")
+                                page.wait_for_selector("div.previous-rolls-item > div", timeout=30000)
+                                last_activity = time.time()
+                                prev = None  # reset baseline after reload
+                            except Exception as reload_e:
+                                print(f"[WARNING] Reload failed: {reload_e}")
 
                         time.sleep(interval_sec)
                     except Exception as e:
