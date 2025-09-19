@@ -39,28 +39,33 @@ class CSGOEmpireScraper:
 
         while True:
             time.sleep(polling_rate)
-            new_ten_rolls = self.read_rolls()
-            if last_ten_rolls == new_ten_rolls:
-                continue
-            else:
-                check = True
-                for i in range(1, len(new_ten_rolls) - 1):
-                    if new_ten_rolls[i-1] != last_ten_rolls[i]:
-                        check = False
-
-                if not check:
-                    print("Something went wrong. Reloading...")
+            try:
+                new_ten_rolls = self.read_rolls()
+                if last_ten_rolls == new_ten_rolls:
                     continue
                 else:
-                    # add new_ten_rolls[len(new_ten_rolls - 1] to csv
-                    new_item = new_ten_rolls[-1]
-                    now = datetime.now().strftime("%H:%M")
-                    with open("rolls.csv", "a", newline="") as f:
-                        writer = csv.writer(f)
-                        writer.writerow([now, new_item])
-                    print(f"New roll found: {new_item}, at: {now}")
+                    check = True
+                    for i in range(1, len(new_ten_rolls) - 1):
+                        if new_ten_rolls[i-1] != last_ten_rolls[i]:
+                            check = False
 
-                    last_ten_rolls = new_ten_rolls
+                    if not check:
+                        print("Something went wrong. Reloading...")
+                        continue
+                    else:
+                        # add new_ten_rolls[len(new_ten_rolls - 1] to csv
+                        new_item = new_ten_rolls[-1]
+                        now = datetime.now().strftime("%H:%M")
+                        with open("rolls.csv", "a", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow([now, new_item])
+                        print(f"New roll found: {new_item}, at: {now}")
+
+                        last_ten_rolls = new_ten_rolls
+            except Exception as e:
+                print(f"Warning: Exception occurred during read_rolls: {e}. Reloading page...")
+                self.open_page()
+                continue
 
     def read_rolls(self):
         if not self.page:
